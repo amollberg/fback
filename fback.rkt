@@ -1,72 +1,72 @@
 #! /usr/local/bin/racket
 #lang racket/base
 
-; Procedures:
-; If file changed from previous file version or snapshot:
-; 	Copy new file version
-; If time since last snapshot > threshold
-; 	Make new snapshot
-; Restore subfolder at destination to date:
-; 	For each file in subfolder:
-; 		Find newest version older than or equal to date
-; 		Copy that version to destination
-; If free space < threshold OR snapshot failed OR file version copy failed
-; 	# Merge snapshots
-; 	While number of snapshots > snapthreshold
-; 		OverwriteCopy second oldest snapshot to oldest snapshot
-; 	# Remove file versions
-; 	For each file:	
-; 		occupation=size*(revisions - revthreshold)
-; 	While files with positive occupation exist AND (free space < threshold OR snapshot failed OR file version copy failed)
-; 		Remove the oldest revision of the file with highest positive occupation
-; 	While free space < threshold OR snapshot failed OR file version copy failed
-; 		Remove a revision that is older than the newest snapshot from the file with highest occupation
-; 	
-; 
-; 
-; Pseudo-Predicates:
-; 	* file changed from previous file version or snapshot
-; 		Compare size
-; 		If equal size
-; 			Compare checksum
-; 	* time since last snapshot
-; 		Parse folder name of last folder in snapshot top folder
-; 	* Find newest version older than or equal to date
-; 		Traverse file revisions
-; 			If revision older than or equal to date
-; 				Save path of file
-; 		Traverse file revisions in snapshots
-; 			If revision older than or equal to date
-; 				Save path of file
-; 		Return the path that is newer of the two
-; 	* Copy that version to destination
-; 		FileCopy with force flag
-; 	* free space
-; 		DriveSpaceFree or procedure during testing
-; 	* snapshot failed
-; 		ErrorLevel during FileCopy
-; 	* file version copy failed
-; 		ErrorLevel during FileCopy
-; 	* number of snapshots
-; 		Traverse snapshot top folder
-; 			Increment a counter
-; 	* OverwriteCopy second oldest snapshot to oldest snapshot
-; 		Traverse snapshot top folder to find the snapshots
-; 	* files with positive occupation exist
-; 		Traverse file list 
-; 			Traverse file revisions
-; 				Sum file size
-; 			Write sum to file list
-; 	* Remove the oldest revision of the file with highest positive occupation
-; 	* Remove a revision that is older than the newest snapshot from the file with highest occupation
-; 
-; 
-; 
-; 	File structures:
-; 		U:\Snapshots\20150830111559\D\<path on source drive>
-; 		U:\FileRevisions\20150830111559\D\<path on source drive>
-; 	Data structures:
-; 		Map : file path -> occupation
+;; Procedures:
+;; If file changed from previous file version or snapshot:
+;; 	Copy new file version
+;; If time since last snapshot > threshold
+;; 	Make new snapshot
+;; Restore subfolder at destination to date:
+;; 	For each file in subfolder:
+;; 		Find newest version older than or equal to date
+;; 		Copy that version to destination
+;; If free space < threshold OR snapshot failed OR file version copy failed
+;; 	# Merge snapshots
+;; 	While number of snapshots > snapthreshold
+;; 		OverwriteCopy second oldest snapshot to oldest snapshot
+;; 	# Remove file versions
+;; 	For each file:	
+;; 		occupation=size*(revisions - revthreshold)
+;; 	While files with positive occupation exist AND (free space < threshold OR snapshot failed OR file version copy failed)
+;; 		Remove the oldest revision of the file with highest positive occupation
+;; 	While free space < threshold OR snapshot failed OR file version copy failed
+;; 		Remove a revision that is older than the newest snapshot from the file with highest occupation
+;; 	
+;; 
+;; 
+;; Pseudo-Predicates:
+;; 	* file changed from previous file version or snapshot
+;; 		Compare size
+;; 		If equal size
+;; 			Compare checksum
+;; 	* time since last snapshot
+;; 		Parse folder name of last folder in snapshot top folder
+;; 	* Find newest version older than or equal to date
+;; 		Traverse file revisions
+;; 			If revision older than or equal to date
+;; 				Save path of file
+;; 		Traverse file revisions in snapshots
+;; 			If revision older than or equal to date
+;; 				Save path of file
+;; 		Return the path that is newer of the two
+;; 	* Copy that version to destination
+;; 		FileCopy with force flag
+;; 	* free space
+;; 		DriveSpaceFree or procedure during testing
+;; 	* snapshot failed
+;; 		ErrorLevel during FileCopy
+;; 	* file version copy failed
+;; 		ErrorLevel during FileCopy
+;; 	* number of snapshots
+;; 		Traverse snapshot top folder
+;; 			Increment a counter
+;; 	* OverwriteCopy second oldest snapshot to oldest snapshot
+;; 		Traverse snapshot top folder to find the snapshots
+;; 	* files with positive occupation exist
+;; 		Traverse file list 
+;; 			Traverse file revisions
+;; 				Sum file size
+;; 			Write sum to file list
+;; 	* Remove the oldest revision of the file with highest positive occupation
+;; 	* Remove a revision that is older than the newest snapshot from the file with highest occupation
+;; 
+;; 
+;; 
+;; 	File structures:
+;; 		U:\Snapshots\20150830111559\D\<path on source drive>
+;; 		U:\FileRevisions\20150830111559\D\<path on source drive>
+;; 	Data structures:
+;; 		Map : file path -> occupation
 
 
 (require "options.rkt")
@@ -88,7 +88,6 @@
 
 (require racket/string)	
 (define (filepath-to-rev-regex fp)
-                                        ;(printf "rr:~a\n" 
   (pregexp
    (string-append 
     "(?i:^"
@@ -140,7 +139,6 @@
 (require file/sha1)	
 (define (file-changed? fp)	
   (let ((newest (newest-revision-path (newest-revision-tuple fp))))
-;    (printf "~a, ~a, ~a\n" fp newest (null? newest))
     (cond [(null? fp)
            #f]
           [(null? newest) 
@@ -166,8 +164,6 @@
                 "FileRevisions\\"
                 timestamp)))
 
-(displayln (new-timestamp-string))
-
 (require racket/file)
 (for ([f (in-directory (current-directory))])
   (let* ((ts (new-timestamp-string))
@@ -181,16 +177,16 @@
         (printf "unchanged: ~a\n" f))
     #f)))
 
-                                        ; Get free space
+
+;; Get amount of free space
 (require math/base)	
 (require racket/sequence)	
 (define (get-free-space)
   (- 40000 
-     (sequence-fold + 0
-                    (sequence-map file-size
-                                  (in-directory (current-directory))))))
+     (sequence-fold
+      + 0
+      (sequence-map
+       file-size
+       (in-directory (current-directory))))))
 
-(get-free-space)		
-                                        ;(for ([f (in-directory (current-directory))]) 
-                                        ;(printf "file:~a\n" f))
-                                        ;)
+;;(get-free-space)
