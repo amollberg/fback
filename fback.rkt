@@ -58,16 +58,15 @@
 ; 				Sum file size
 ; 			Write sum to file list
 ; 	* Remove the oldest revision of the file with highest positive occupation
-                                        ; 	* Remove a revision that is older than the newest snapshot from the file with highest occupation
-                                        ; 
-                                        ; 
-                                        ; 
-                                        ; 	File structures:
-                                        ; 		U:\Snapshots\20150830111559\D\<path on source drive>
-                                        ; 		U:\FileRevisions\20150830111559\D\<path on source drive>
-                                        ; 	Data structures:
-                                        ; 		Map : file path -> occupation
-                                        ;		Map : 
+; 	* Remove a revision that is older than the newest snapshot from the file with highest occupation
+; 
+; 
+; 
+; 	File structures:
+; 		U:\Snapshots\20150830111559\D\<path on source drive>
+; 		U:\FileRevisions\20150830111559\D\<path on source drive>
+; 	Data structures:
+; 		Map : file path -> occupation
 
 
 (require "options.rkt")
@@ -102,7 +101,6 @@
                     "[0-9]+")))
      "\\" "\\\\")
     "$)"))
-                                        ;(pregexp "C:\\\\Users\\\\Alex\\\\Desktop\\\\testfback\\\\b\\\\(Snapshots|FileRevisions)\\\\\\d+\\\\c\\\\users\\\\alex\\\\desktop\\\\testfback\\\\"))
   )
 
 
