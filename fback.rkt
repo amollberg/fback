@@ -234,32 +234,35 @@ EOF
 
 (require racket/file)
 (define (backup-directory directorypath)
-  (for ([f (in-directory (current-directory))])
-  (let* ((ts (new-timestamp-string))
-         (rev-path (revision-filepath f ts)))
-    (if (file-exists? f) ; If not directory
-        (if (file-changed? f)
-            (begin
-              (printf "  changed: ~a\n" rev-path)
-              (make-directory* (path-only rev-path))
-              (copy-file f rev-path))
-	    ;;(printf "unchanged: ~a\n" f)
-	    (void)
-	    )
-	(void)))))
+  (let ((ts (new-timestamp-string)))
+    (for ([f (in-directory (current-directory))])
+	 (let ((rev-path (revision-filepath f ts)))
+	   (if (file-exists? f) ; If not directory
+	       (if (file-changed? f)
+		   (begin
+		     (printf "  changed: ~a\n" rev-path)
+		     (make-directory* (path-only rev-path))
+		     (copy-file f rev-path))
+		   ;;(printf "unchanged: ~a\n" f)
+		   (void)
+		   )
+	       (void))))))
 
 (require racket/cmdline)
 (let ((args (vector->list (current-command-line-arguments))))
   (if (null? args)
       (display-help)
       (case (first args)
-	[("revisions") (list-revisions (map
-					(lambda (path)
-					  (path->complete-path (string->path path)))
-					(rest args)))]
-	[("restore") (restore-revision (second args)
-				       (path->complete-path (string->path (third args))))]
-	[else (backup-directory (path->complete-path (string->path (first args))))])))
+	[("revisions")
+	 (list-revisions (map
+			  (lambda (path)
+			    (path->complete-path (string->path path)))
+			  (rest args)))]
+	[("restore")
+	 (restore-revision (second args)
+			   (path->complete-path (string->path (third args))))]
+	[else
+	 (backup-directory (path->complete-path (string->path (first args))))])))
 
 
 
