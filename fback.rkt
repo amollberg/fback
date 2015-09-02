@@ -230,7 +230,7 @@ EOF
   (void))
 
 (define (restore-revision datestring filepath)
-  null)
+  null) ;; TODO
 
 (require racket/file)
 (define (backup-directory directorypath)
@@ -247,20 +247,6 @@ EOF
 	    (void)
 	    )
 	(void)))))
-
-
-
-;;(sequence-map (lambda (rev) (displayln rev))
-;;	      (revision-sequence (path->complete-path (string->path "fback.rkt"))))
-(define fp (path->complete-path (string->path "fback.rkt")))
-;(sequence->list
-; (sequence-map 
-; (lambda (rev-path)
-;   (list (revision-datestring rev-path)
-;	 (file-checksum rev-path)
-;	 (file-size rev-path)
-;	 rev-path))
-					; (in-directory BACKUP-BASEPATH)))
 
 (require racket/cmdline)
 (let ((args (vector->list (current-command-line-arguments))))
