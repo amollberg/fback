@@ -1,6 +1,24 @@
 #! /usr/local/bin/racket
 #lang racket/base
 
+(define (display-help)
+  (displayln #<<EOF
+Command-line syntax:
+
+fback
+ - Show this help screen
+
+fback <directory>
+ - Backup <directory> using default configuration
+
+fback revisions <files>
+ - List dates, checksums and file sizes of all revisions of each of <files>
+
+fback restore <datestring> <file>
+ - Restore <file> to the revision at <datestring>
+EOF
+ ))
+
 ;; Procedures:
 ;; If file changed from previous file version or snapshot:
 ;; 	Copy new file version
@@ -75,7 +93,8 @@
 (define-options backup-basepath)
 
 (define BACKUP-BASEPATH backup-basepath)
-
+(when (not (directory-exists? BACKUP-BASEPATH))
+    (make-directory* BACKUP-BASEPATH))
 
 (define (tee val)
   (printf "~a\n" val)
@@ -85,6 +104,7 @@
 (require racket/list)	
 (define (get-drive-letter filepath)
   (substring (path->string (first (explode-path filepath))) 0 1))	
+
 
 (require racket/string)	
 (define (filepath-to-rev-regex fp)
@@ -99,28 +119,32 @@
                     "(Snapshots|FileRevisions)\\"
                     "[0-9]+")))
      "\\" "\\\\")
-    "$)"))
-  )
+    "$)")))
 
 
 (require racket/path)	
 (define (revision-datestring rev-path)
   (path->string (second (explode-path (find-relative-path BACKUP-BASEPATH rev-path)))))
 
-(define (revision-sequence fp)
+(define (file-checksum filepath)
+  (sha1 (open-input-file filepath)))
+
+
+(define (revision-sequence fp)  
   (sequence-map 
-   (lambda (rev-path) 
-     (cons (revision-datestring rev-path) rev-path))
+   (lambda (rev-path)
+     (list (revision-datestring rev-path)
+	   (file-checksum rev-path)
+	   (file-size rev-path)
+	   rev-path))
    (sequence-filter 
     (lambda (rev-path) 	
-                                        ;(printf " candidate: ~a\n" (path->string rev-path))
       (regexp-match 
        (filepath-to-rev-regex fp)
        (path->string rev-path)))
     (in-directory BACKUP-BASEPATH))))
 
 (define (newest-revision-tuple fp)
-                                        ;(printf "regex: ~a\n" (filepath-to-rev-regex fp))
   (let* ((sorted-revs 
           (sort (sequence->list (revision-sequence fp))
                 #:key car 
@@ -129,16 +153,33 @@
         null
         (first sorted-revs))))
 
-(define (newest-revision-path rev-tuple)
+
+
+(define (revision-tuple-datestring rev-tuple)
   (if (null? rev-tuple)
       null
-      (cdr rev-tuple)))
+      (first rev-tuple)))
 
+(define (revision-tuple-checksum rev-tuple)
+  (if (null? rev-tuple)
+      null
+      (second rev-tuple)))
+
+(define (revision-tuple-filesize rev-tuple)
+  (if (null? rev-tuple)
+      null
+      (third rev-tuple)))
+
+
+(define (revision-tuple-path rev-tuple)
+  (if (null? rev-tuple)
+      null
+      (fourth rev-tuple)))
 
 
 (require file/sha1)	
 (define (file-changed? fp)	
-  (let ((newest (newest-revision-path (newest-revision-tuple fp))))
+  (let ((newest (revision-tuple-path (newest-revision-tuple fp))))
     (cond [(null? fp)
            #f]
           [(null? newest) 
@@ -147,10 +188,9 @@
                    (file-size fp))) 
            #t]
           [(not (string=? (sha1 (open-input-file fp))
-                   (sha1 (open-input-file fp))))
+			  (sha1 (open-input-file fp))))
            #t]
           [#t #f])))
-
 
 
 (require srfi/19)
@@ -164,21 +204,8 @@
                 "FileRevisions\\"
                 timestamp)))
 
-(require racket/file)
-(for ([f (in-directory (current-directory))])
-  (let* ((ts (new-timestamp-string))
-         (rev-path (revision-filepath f ts)))
-    (if (file-exists? f) ; If not directory
-        (if (file-changed? f)
-            (begin
-              (printf "  changed: ~a\n" rev-path)
-              (make-directory* (path-only rev-path))
-              (copy-file f rev-path))
-        (printf "unchanged: ~a\n" f))
-    #f)))
 
-
-;; Get amount of free space
+;; Get amount of free space (overrides built-in for testing purposes)
 (require math/base)	
 (require racket/sequence)	
 (define (get-free-space)
@@ -189,4 +216,64 @@
        file-size
        (in-directory (current-directory))))))
 
-;;(get-free-space)
+(define (list-revisions filepaths)
+  (map (lambda (file)
+	 (displayln file)
+	 (sequence-for-each
+	  (lambda (revision-tuple)
+	    (printf "~a\t ~a\t ~a\n"
+		    (revision-tuple-datestring revision-tuple)
+		    (revision-tuple-checksum revision-tuple)
+		    (revision-tuple-filesize revision-tuple)))
+	  (revision-sequence file)))
+       filepaths)
+  (void))
+
+(define (restore-revision datestring filepath)
+  null)
+
+(require racket/file)
+(define (backup-directory directorypath)
+  (for ([f (in-directory (current-directory))])
+  (let* ((ts (new-timestamp-string))
+         (rev-path (revision-filepath f ts)))
+    (if (file-exists? f) ; If not directory
+        (if (file-changed? f)
+            (begin
+              (printf "  changed: ~a\n" rev-path)
+              (make-directory* (path-only rev-path))
+              (copy-file f rev-path))
+	    ;;(printf "unchanged: ~a\n" f)
+	    (void)
+	    )
+	(void)))))
+
+
+
+;;(sequence-map (lambda (rev) (displayln rev))
+;;	      (revision-sequence (path->complete-path (string->path "fback.rkt"))))
+(define fp (path->complete-path (string->path "fback.rkt")))
+;(sequence->list
+; (sequence-map 
+; (lambda (rev-path)
+;   (list (revision-datestring rev-path)
+;	 (file-checksum rev-path)
+;	 (file-size rev-path)
+;	 rev-path))
+					; (in-directory BACKUP-BASEPATH)))
+
+(require racket/cmdline)
+(let ((args (vector->list (current-command-line-arguments))))
+  (if (null? args)
+      (display-help)
+      (case (first args)
+	[("revisions") (list-revisions (map
+					(lambda (path)
+					  (path->complete-path (string->path path)))
+					(rest args)))]
+	[("restore") (restore-revision (second args)
+				       (path->complete-path (string->path (third args))))]
+	[else (backup-directory (path->complete-path (string->path (first args))))])))
+
+
+
