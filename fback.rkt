@@ -90,9 +90,10 @@ EOF
 (require "options.rkt")
 
 (read-options "default.conf")
-(define-options backup-basepath)
+(define-options BACKUP-BASEPATH)
+(define-options MINIMUM-NUMBER-OF-REVISIONS)
 
-(define BACKUP-BASEPATH backup-basepath)
+;;(define BACKUP-BASEPATH backup-basepath)
 (when (not (directory-exists? BACKUP-BASEPATH))
     (make-directory* BACKUP-BASEPATH))
 
@@ -230,7 +231,10 @@ EOF
   (void))
 
 (define (restore-revision datestring filepath)
-  null) ;; TODO
+  (let ((copy-src (revision-filepath filepath datestring))
+	(copy-dest filepath))
+    (printf "Restoring from ~a\n" copy-src)
+    (copy-file copy-src copy-dest #t)))
 
 (require racket/file)
 (define (backup-directory directorypath)
