@@ -230,6 +230,20 @@ EOF
        filepaths)
   (void))
 
+(define (do-cleanup)
+  (println "TODO: Do cleanup"))
+
+(define (drive-full-error? e)
+  (and (exn:fail:filesystem:errno? e) 
+       (equal? (exn:fail:filesystem:errno-errno e)
+	       '(112 . windows))))
+
+(define (safe-copy-file . args)
+  (with-handlers ([drive-full-error? (lambda (e)
+				       (do-cleanup)
+				       (apply safe-copy-file args))])
+		 (apply copy-file args)))
+
 (define (restore-revision datestring filepath)
   (let ((copy-src (revision-filepath filepath datestring))
 	(copy-dest filepath))
@@ -246,7 +260,7 @@ EOF
 		   (begin
 		     (printf "  changed: ~a\n" rev-path)
 		     (make-directory* (path-only rev-path))
-		     (copy-file f rev-path))
+		     (safe-copy-file f rev-path))
 		   ;;(printf "unchanged: ~a\n" f)
 		   (void)
 		   )
