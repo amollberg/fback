@@ -91,9 +91,10 @@ EOF
 
 (read-options "default.conf")
 (define-options BACKUP-BASEPATH)
-(define-options MINIMUM-NUMBER-OF-REVISIONS)
+(define-options minimum-number-of-revisions)
 
-;;(define BACKUP-BASEPATH backup-basepath)
+(define MINIMUM-NUMBER-OF-REVISIONS (string->number minimum-number-of-revisions))
+
 (when (not (directory-exists? BACKUP-BASEPATH))
     (make-directory* BACKUP-BASEPATH))
 
@@ -122,8 +123,18 @@ EOF
      "\\" "\\\\")
     "$)")))
 
+(require racket/path)
+(define (original-filepath rev-path)
+  (let ((orig-fp-list (rest (rest (explode-path (find-relative-path BACKUP-BASEPATH rev-path))))))
+    (set! orig-fp-list
+	  (cons (string->path
+		 (string-append
+		  (path->string (first orig-fp-list))
+		  ":")) ;; Add a : after the drive letter
+		(rest orig-fp-list))) 
+    (apply build-path orig-fp-list)))
 
-(require racket/path)	
+	
 (define (revision-datestring rev-path)
   (path->string (second (explode-path (find-relative-path BACKUP-BASEPATH rev-path)))))
 
@@ -198,6 +209,7 @@ EOF
 (define (new-timestamp-string)
   (date->string (current-date) "~Y~m~d~k~M~S"))
 
+ 
 (define (revision-filepath fp timestamp)
   (reroot-path fp
                (string-append 
@@ -230,8 +242,31 @@ EOF
        filepaths)
   (void))
 
-(define (do-cleanup)
-  (println "TODO: Do cleanup"))
+(define (get-files-with-many-revisions)
+  (sequence-filter
+   (lambda (rev-path)
+     (> 
+      (sequence-length
+       (revision-sequence
+	(original-filepath
+	 (path->string rev-path))))
+      MINIMUM-NUMBER-OF-REVISIONS))
+   (sequence-filter
+    file-exists? ;; Is not directory
+    (in-directory BACKUP-BASEPATH))))
+  
+
+(define (do-cleanup size)
+  (when (> size 0)
+	(let* ((files-to-remove (get-files-with-many-revisions))
+	       (removed-size 0))
+	  (for ([file-to-remove (get-files-with-many-revisions)])
+	       #:break (> removed-size size)
+	       ;;(delete-file file-to-remove)
+	       (set! removed-size (+ removed-size (file-size file-to-remove)))
+	       (printf "Removing ~a, ~a bytes removed total \n" file-to-remove removed-size)))))
+
+(do-cleanup 20000)
 
 (define (drive-full-error? e)
   (and (exn:fail:filesystem:errno? e) 
@@ -240,8 +275,8 @@ EOF
 
 (define (safe-copy-file . args)
   (with-handlers ([drive-full-error? (lambda (e)
-				       (do-cleanup)
-				       (apply safe-copy-file args))])
+				       (do-cleanup) ;; Clear up some space on backup drive
+				       (apply safe-copy-file args))]) ;; Try to back up file again
 		 (apply copy-file args)))
 
 (define (restore-revision datestring filepath)
