@@ -87,13 +87,22 @@ EOF
 ;; 		Map : file path -> occupation
 
 
+(define (string->boolean str)
+  (case str
+    [("#t") #t]
+    [("#f") #f]
+    [else (raise-argument-error 'sting->boolean "boolean?" str)]))
+
 (require "options.rkt")
 
 (read-options "default.conf")
 (define-options BACKUP-BASEPATH)
 (define-options minimum-number-of-revisions)
+(define-options DB-FILE)
+(define-options do-use-file-checksum)
 
 (define MINIMUM-NUMBER-OF-REVISIONS (string->number minimum-number-of-revisions))
+(define DO-USE-FILE-CHECKSUM (string->boolean do-use-file-checksum))
 
 (when (not (directory-exists? BACKUP-BASEPATH))
     (make-directory* BACKUP-BASEPATH))
@@ -101,6 +110,87 @@ EOF
 (define (tee val)
   (printf "~a\n" val)
   val)
+
+
+;; DB:
+;;  #hash "filename" -> ( #hash "000datestring" -> (date checksum size pathstring))
+
+(define (print-db)
+  (if (equal? DB-sym 'not-init)
+      (displayln DB-sym)
+      (hash-for-each
+       DB-sym
+       (lambda (key val)
+	 (printf "~a\n" key)
+	 (hash-for-each
+	  val
+	  (lambda (rev-key rev-val)
+	    (printf "  ~a\n"
+		    rev-key)))))))
+
+(define (export-db db)
+  ;;(print-db)
+  (unless (equal? DB-sym 'not-init)
+	  (define outfile (open-output-file DB-FILE #:exists 'replace))
+	  (write db outfile)
+	  (close-output-port outfile)))
+
+(define (empty-db)
+  (make-hash))
+
+(define (make-mutable db)
+  (define mutable-db (make-hash))
+  (hash-for-each
+   db
+   (lambda (key value)
+     (hash-set! mutable-db
+		key
+		(hash-copy value))))
+  mutable-db)
+
+(define (import-db)
+  (with-handlers ([exn:fail:filesystem? ;; Database file does not exist; return empty 
+		   (lambda (exception) (empty-db))])
+		 (define infile (open-input-file DB-FILE))
+		 (define db (read infile))
+		 (close-input-port infile)
+		 (make-mutable db)))
+
+
+;; Memoize DB to minimize file I/O
+(define DB-sym 'not-init)
+(define (DB)
+  (when (equal? DB-sym 'not-init)
+	(set! DB-sym (import-db)))
+  (immutable? DB-sym)
+  DB-sym)
+
+(define (DB-list-revisions filepath)
+  ;;(displayln (hash-ref (DB) filepath #f))
+  ;;(if (hash-has-key? (DB) (path->string filepath))
+  ;;    (printf ".")
+  ;;    (printf "-"))
+  (hash-ref (DB) (path->string filepath) #f))
+  
+
+(define (DB-remove-revision filepath datestring-to-remove)
+  ;;(displayln (DB))
+  (let ((revision-tbl
+	 (DB-list-revisions filepath)))
+    (unless (equal? revision-tbl #f)
+	    (hash-remove! revision-tbl datestring-to-remove))))
+
+(define (DB-add-revision filepath rev-tuple)
+  ;(displayln (hash? (DB)))
+  ;(displayln (immutable? (DB)))
+  ;(displayln filepath)
+  ;(displayln rev-tuple)
+  (when (not (hash-has-key? (DB) (path->string filepath)))
+	(hash-set! (DB) (path->string filepath) (make-hash)))
+  ;;(displayln (immutable? (hash-ref (DB) (path->string filepath))))
+  (hash-set! (hash-ref (DB) (path->string filepath))
+	     (revision-tuple-datestring rev-tuple)
+	     rev-tuple))
 
 
 (require racket/list)	
@@ -142,19 +232,23 @@ EOF
   (sha1 (open-input-file filepath)))
 
 
-(define (revision-sequence fp)  
-  (sequence-map 
-   (lambda (rev-path)
-     (list (revision-datestring rev-path)
-	   (file-checksum rev-path)
-	   (file-size rev-path)
-	   rev-path))
-   (sequence-filter 
-    (lambda (rev-path) 	
-      (regexp-match 
-       (filepath-to-rev-regex fp)
-       (path->string rev-path)))
-    (in-directory BACKUP-BASEPATH))))
+(define (revision-sequence fp)
+  (let ((rev-tbl (DB-list-revisions fp)))
+    (if (equal? rev-tbl #f)
+	;; Need to fill in the gaps in the DB by reading from file system
+	(sequence-map 
+	 (lambda (rev-path)
+	   (let ((new-rev-tuple (make-revision-tuple rev-path)))
+	     (DB-add-revision fp new-rev-tuple)
+	     new-rev-tuple))
+	 (sequence-filter 
+	  (lambda (rev-path) 	
+	    (regexp-match 
+	     (filepath-to-rev-regex fp)
+	     (path->string rev-path)))
+	  (in-directory BACKUP-BASEPATH)))
+	;; Just return what is in DB
+	(in-hash-values rev-tbl))))
 
 (define (newest-revision-tuple fp)
   (let* ((sorted-revs 
@@ -186,8 +280,7 @@ EOF
 (define (revision-tuple-path rev-tuple)
   (if (null? rev-tuple)
       null
-      (fourth rev-tuple)))
-
+      (string->path (fourth rev-tuple))))
 
 (require file/sha1)	
 (define (file-changed? fp)	
@@ -195,13 +288,14 @@ EOF
     (cond [(null? fp)
            #f]
           [(null? newest) 
-           #t]
+	     #t]
           [(not (= (file-size newest)
                    (file-size fp))) 
-           #t]
-          [(not (string=? (sha1 (open-input-file fp))
-			  (sha1 (open-input-file fp))))
-           #t]
+	     #t]
+          [(and DO-USE-FILE-CHECKSUM
+		  (not (string=? (sha1 (open-input-file fp))
+				 (sha1 (open-input-file fp)))))
+	     #t]
           [#t #f])))
 
 
@@ -217,6 +311,12 @@ EOF
                 "FileRevisions\\"
                 timestamp)))
 
+(define (make-revision-tuple rev-path)
+  (list (revision-datestring rev-path)
+	(file-checksum rev-path)
+	(file-size rev-path)
+	(path->string rev-path)))
+
 
 ;; Get amount of free space (overrides built-in for testing purposes)
 (require math/base)	
@@ -230,17 +330,22 @@ EOF
        (in-directory (current-directory))))))
 
 (define (list-revisions filepaths)
-  (map (lambda (file)
-	 (displayln file)
-	 (sequence-for-each
-	  (lambda (revision-tuple)
-	    (printf "~a\t ~a\t ~a\n"
-		    (revision-tuple-datestring revision-tuple)
-		    (revision-tuple-checksum revision-tuple)
-		    (revision-tuple-filesize revision-tuple)))
-	  (revision-sequence file)))
-       filepaths)
-  (void))
+  (for-each
+   (lambda (file)
+     (displayln file)
+     (for-each
+      (lambda (revision-tuple)
+	
+	(printf "~a\t ~a\t ~a\n"
+		(revision-tuple-datestring revision-tuple)
+		(revision-tuple-checksum revision-tuple)
+		(revision-tuple-filesize revision-tuple)))
+      (sort
+       (sequence->list
+	(revision-sequence file))
+       #:key car 
+       string<?)))
+   filepaths))
 
 (define (get-files-with-many-revisions)
   (sequence-filter
@@ -262,11 +367,13 @@ EOF
 	       (removed-size 0))
 	  (for ([file-to-remove (get-files-with-many-revisions)])
 	       #:break (> removed-size size)
+	       (DB-remove-revision (original-filepath file-to-remove)
+				   (revision-datestring file-to-remove))
 	       ;;(delete-file file-to-remove)
 	       (set! removed-size (+ removed-size (file-size file-to-remove)))
 	       (printf "Removing ~a, ~a bytes removed total \n" file-to-remove removed-size)))))
 
-(do-cleanup 20000)
+;;(do-cleanup 20000)
 
 (define (drive-full-error? e)
   (and (exn:fail:filesystem:errno? e) 
@@ -288,34 +395,42 @@ EOF
 (require racket/file)
 (define (backup-directory directorypath)
   (let ((ts (new-timestamp-string)))
-    (for ([f (in-directory (current-directory))])
+    (for ([f (in-directory (simplify-path directorypath))])
 	 (let ((rev-path (revision-filepath f ts)))
 	   (if (file-exists? f) ; If not directory
 	       (if (file-changed? f)
 		   (begin
 		     (printf "  changed: ~a\n" rev-path)
 		     (make-directory* (path-only rev-path))
-		     (safe-copy-file f rev-path))
+		     
+		     (safe-copy-file f rev-path)
+		     (DB-add-revision f (make-revision-tuple rev-path))
+		     )
+		   
 		   ;;(printf "unchanged: ~a\n" f)
-		   (void)
-		   )
+		   (void))
 	       (void))))))
 
 (require racket/cmdline)
-(let ((args (vector->list (current-command-line-arguments))))
-  (if (null? args)
-      (display-help)
-      (case (first args)
-	[("revisions")
-	 (list-revisions (map
-			  (lambda (path)
-			    (path->complete-path (string->path path)))
-			  (rest args)))]
-	[("restore")
-	 (restore-revision (second args)
-			   (path->complete-path (string->path (third args))))]
-	[else
-	 (backup-directory (path->complete-path (string->path (first args))))])))
+(require profile)
+;(profile
+ (let ((args
+	(vector->list (current-command-line-arguments))))
+   (if (null? args)
+       (display-help)
+       (case (first args)
+	 [("revisions")
+	  (list-revisions (map
+			   (lambda (path)
+			     (path->complete-path (string->path path)))
+			   (rest args)))]
+	 [("restore")
+	  (restore-revision (second args)
+			    (path->complete-path (string->path (third args))))]
+	 [else
+	  (backup-directory (path->complete-path (string->path (first args))))]))
+   (export-db (DB)))
+;)
 
 
 
